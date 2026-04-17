@@ -1,6 +1,14 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { closeDb } from "./db/client";
+import { registerProfileHandlers } from "./ipc/profile";
+import { registerSettingsHandlers } from "./ipc/settings";
+import { registerJobHandlers } from "./ipc/jobs";
+import { registerScenarioHandlers } from "./ipc/scenarios";
+import { registerCvHandlers } from "./ipc/cvs";
+import { registerCostHandlers } from "./ipc/costs";
+import { registerBackupHandlers } from "./ipc/backup";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -40,6 +48,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Register all IPC handlers before creating window
+  registerProfileHandlers();
+  registerSettingsHandlers();
+  registerJobHandlers();
+  registerScenarioHandlers();
+  registerCvHandlers();
+  registerCostHandlers();
+  registerBackupHandlers();
+
+  ipcMain.handle("app:getVersion", () => app.getVersion());
+
   createWindow();
 
   app.on("activate", () => {
@@ -49,4 +68,8 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("will-quit", () => {
+  closeDb();
 });
