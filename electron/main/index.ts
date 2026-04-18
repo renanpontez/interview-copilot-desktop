@@ -10,6 +10,7 @@ import { registerCvHandlers } from "./ipc/cvs";
 import { registerCostHandlers } from "./ipc/costs";
 import { registerBackupHandlers } from "./ipc/backup";
 import { registerAiHandlers, setApiKeyGetter } from "./ipc/ai";
+import { setupMenu } from "./menu";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -21,6 +22,7 @@ function createWindow() {
     minHeight: 600,
     title: "Interview Copilot",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#0a0a0a",
     show: false,
     webPreferences: {
@@ -33,7 +35,6 @@ function createWindow() {
 
   win.on("ready-to-show", () => win.show());
 
-  // Open external links in the default browser
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
@@ -49,7 +50,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Register all IPC handlers before creating window
+  // IPC handlers
   registerProfileHandlers();
   registerSettingsHandlers();
   registerJobHandlers();
@@ -59,10 +60,12 @@ app.whenReady().then(() => {
   registerBackupHandlers();
   registerAiHandlers();
 
-  // Wire api key getter: AI handlers read the key that settings:setApiKey stores
   setApiKeyGetter(getStoredApiKey);
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
+
+  // Native menu
+  setupMenu();
 
   createWindow();
 

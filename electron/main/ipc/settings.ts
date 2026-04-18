@@ -2,11 +2,28 @@ import { ipcMain } from "electron";
 import { getDb } from "../db/client";
 import type { AppSettings } from "../../types/domain";
 
-// API key stored in memory for now; Phase 5 moves to Keychain via keytar.
-let _apiKey = "";
+const SERVICE = "interview-copilot";
+const ACCOUNT = "api-key";
 
-export function getStoredApiKey(): string | null {
-  return _apiKey || null;
+// Dynamically import keytar (native module)
+async function getKeytar() {
+  try {
+    return await import("keytar");
+  } catch {
+    return null;
+  }
+}
+
+// Fallback: in-memory store if keytar unavailable
+let _fallbackKey = "";
+
+export async function getStoredApiKey(): Promise<string | null> {
+  const kt = await getKeytar();
+  if (kt) {
+    const key = await kt.getPassword(SERVICE, ACCOUNT);
+    return key || null;
+  }
+  return _fallbackKey || null;
 }
 
 export function registerSettingsHandlers() {
@@ -38,12 +55,21 @@ export function registerSettingsHandlers() {
     }
   );
 
-  ipcMain.handle("settings:getApiKey", (): string | null => {
-    return _apiKey || null;
+  ipcMain.handle("settings:getApiKey", async (): Promise<string | null> => {
+    return getStoredApiKey();
   });
 
-  ipcMain.handle("settings:setApiKey", (_e, key: string) => {
-    _apiKey = key;
+  ipcMain.handle("settings:setApiKey", async (_e, key: string) => {
+    const kt = await getKeytar();
+    if (kt) {
+      if (key) {
+        await kt.setPassword(SERVICE, ACCOUNT, key);
+      } else {
+        await kt.deletePassword(SERVICE, ACCOUNT);
+      }
+    } else {
+      _fallbackKey = key;
+    }
   });
 
   ipcMain.handle("settings:isWelcomeDismissed", (): boolean => {
