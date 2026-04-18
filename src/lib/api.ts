@@ -48,6 +48,17 @@ export interface DesktopApi {
     track: (entry: Omit<TokenUsage, "timestamp">) => Promise<SessionCosts>;
     reset: () => Promise<void>;
   };
+  ai: {
+    generateQuestions: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    scoreAnswer: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    analyzeCv: (input: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    transcribeAudio: (data: Uint8Array, context?: string) => Promise<string>;
+    chat: {
+      start: (input: Record<string, unknown>) => Promise<void>;
+      onChunk: (cb: (data: { text: string }) => void) => () => void;
+      onDone: (cb: (data: { fullText: string; usage: unknown }) => void) => () => void;
+    };
+  };
   backup: {
     exportAll: () => Promise<string>;
     importAll: (json: string) => Promise<void>;

@@ -14,12 +14,16 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/openai": "^3.0.53",
     "@base-ui/react": "^1.4.0",
     "@superdoc-dev/react": "^1.1.1",
+    "ai": "^6.0.168",
     "better-sqlite3": "^12.9.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
+    "openai": "^6.34.0",
     "react-router-dom": "^7.14.1",
     "shadcn": "^4.2.0",
     "tailwind-merge": "^3.5.0",

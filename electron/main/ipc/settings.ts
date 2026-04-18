@@ -5,6 +5,10 @@ import type { AppSettings } from "../../types/domain";
 // API key stored in memory for now; Phase 5 moves to Keychain via keytar.
 let _apiKey = "";
 
+export function getStoredApiKey(): string | null {
+  return _apiKey || null;
+}
+
 export function registerSettingsHandlers() {
   ipcMain.handle("settings:get", (): AppSettings => {
     const row = getDb()

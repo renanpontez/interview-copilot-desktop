@@ -3,12 +3,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeDb } from "./db/client";
 import { registerProfileHandlers } from "./ipc/profile";
-import { registerSettingsHandlers } from "./ipc/settings";
+import { registerSettingsHandlers, getStoredApiKey } from "./ipc/settings";
 import { registerJobHandlers } from "./ipc/jobs";
 import { registerScenarioHandlers } from "./ipc/scenarios";
 import { registerCvHandlers } from "./ipc/cvs";
 import { registerCostHandlers } from "./ipc/costs";
 import { registerBackupHandlers } from "./ipc/backup";
+import { registerAiHandlers, setApiKeyGetter } from "./ipc/ai";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -56,6 +57,10 @@ app.whenReady().then(() => {
   registerCvHandlers();
   registerCostHandlers();
   registerBackupHandlers();
+  registerAiHandlers();
+
+  // Wire api key getter: AI handlers read the key that settings:setApiKey stores
+  setApiKeyGetter(getStoredApiKey);
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
 

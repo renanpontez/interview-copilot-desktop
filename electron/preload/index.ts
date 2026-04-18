@@ -40,8 +40,30 @@ const api = {
     track: (entry: Record<string, unknown>) => ipcRenderer.invoke("costs:track", entry),
     reset: () => ipcRenderer.invoke("costs:reset"),
   },
-  // AI handlers added in Phase 4
-  ai: {},
+  ai: {
+    generateQuestions: (input: Record<string, unknown>) =>
+      ipcRenderer.invoke("ai:generateQuestions", input),
+    scoreAnswer: (input: Record<string, unknown>) =>
+      ipcRenderer.invoke("ai:scoreAnswer", input),
+    analyzeCv: (input: Record<string, unknown>) =>
+      ipcRenderer.invoke("ai:analyzeCv", input),
+    transcribeAudio: (data: Uint8Array, context?: string) =>
+      ipcRenderer.invoke("ai:transcribeAudio", data, context),
+    chat: {
+      start: (input: Record<string, unknown>) =>
+        ipcRenderer.invoke("ai:chat:start", input),
+      onChunk: (cb: (data: { text: string }) => void) => {
+        const handler = (_e: unknown, data: { text: string }) => cb(data);
+        ipcRenderer.on("ai:chat:chunk", handler);
+        return () => ipcRenderer.removeListener("ai:chat:chunk", handler);
+      },
+      onDone: (cb: (data: { fullText: string; usage: unknown }) => void) => {
+        const handler = (_e: unknown, data: { fullText: string; usage: unknown }) => cb(data);
+        ipcRenderer.on("ai:chat:done", handler);
+        return () => ipcRenderer.removeListener("ai:chat:done", handler);
+      },
+    },
+  },
   backup: {
     exportAll: () => ipcRenderer.invoke("backup:exportAll"),
     importAll: (json: string) => ipcRenderer.invoke("backup:importAll", json),
