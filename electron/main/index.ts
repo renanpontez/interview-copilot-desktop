@@ -11,6 +11,7 @@ import { registerCostHandlers } from "./ipc/costs";
 import { registerBackupHandlers } from "./ipc/backup";
 import { registerAiHandlers, setApiKeyGetter } from "./ipc/ai";
 import { setupMenu } from "./menu";
+import { setupAutoUpdater } from "./updater";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
@@ -64,10 +65,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
 
-  // Native menu
   setupMenu();
-
   createWindow();
+
+  // Check for updates (only in packaged builds)
+  if (app.isPackaged) setupAutoUpdater();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
