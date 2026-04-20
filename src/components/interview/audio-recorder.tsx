@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Mic, MicOff } from "lucide-react";
+import { api } from "@/lib/api";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SpeechRecognitionAny = any;
@@ -66,8 +67,10 @@ export function AudioRecorder({
     };
   }, [stopTimer]);
 
-  const supportsBrowserSpeech = typeof window !== "undefined" && getSpeechRecognition() !== null;
-  const effectiveMode = mode === "browser" && supportsBrowserSpeech ? "browser" : "whisper";
+  // In Electron, Web Speech API exists but doesn't work (needs Google server).
+  // Always use Whisper in desktop.
+  const effectiveMode = "whisper" as const;
+  void mode; // prop kept for API compat
 
   // --- Browser Speech API ---
   function startBrowserRecording() {
@@ -135,78 +138,96 @@ export function AudioRecorder({
     setLiveText("");
   }
 
-  // --- Whisper (OpenAI) ---
+  // --- Whisper with chunked transcription ---
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const allChunksRef = useRef<Blob[]>([]);
+
   async function startWhisperRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm",
-      });
+      streamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
+      allChunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+          allChunksRef.current.push(e.data);
+        }
       };
 
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        await transcribeWithWhisper(blob);
-      };
-
-      recorder.start();
+      // Request data every 1s so chunks accumulate
+      recorder.start(1000);
       recorderRef.current = recorder;
       setIsRecording(true);
       setDuration(0);
       timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
+
+      // Send accumulated audio to Whisper every 5 seconds
+      chunkIntervalRef.current = setInterval(async () => {
+        if (chunksRef.current.length === 0) return;
+        const blob = new Blob([...allChunksRef.current], { type: mimeType });
+        try {
+          const buf = new Uint8Array(await blob.arrayBuffer());
+          const text = await api.ai.transcribeAudio(buf, whisperContext);
+          if (text) onTranscript(text);
+        } catch {
+          // chunk failed — will retry on next interval or final
+        }
+      }, 5000);
     } catch {
-      alert("Microphone access denied");
+      alert("Microphone access denied. Grant permission in System Settings → Privacy & Security → Microphone.");
     }
   }
 
   function stopWhisperRecording() {
+    // Stop chunk interval
+    if (chunkIntervalRef.current) {
+      clearInterval(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
+    }
     recorderRef.current?.stop();
     recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     setIsRecording(false);
     stopTimer();
+
+    // Final transcription on full audio
+    finalTranscribe();
   }
 
-  async function transcribeWithWhisper(blob: Blob) {
-    if (!apiKey) {
-      alert("An OpenAI API key is required for Whisper transcription. Switch to browser mode or set your key in Settings.");
-      return;
-    }
+  async function finalTranscribe() {
+    if (allChunksRef.current.length === 0) return;
     setIsTranscribing(true);
     try {
-      // TODO: Phase 4 — replace with api.ai.transcribeAudio()
-      // For now, just pass through the blob info
-      void blob;
-      void whisperContext;
-      alert("Whisper transcription will be available in Phase 4. Use browser mode for now.");
+      const blob = new Blob(allChunksRef.current, { type: "audio/webm" });
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const transcript = await api.ai.transcribeAudio(buf, whisperContext);
+      if (transcript) {
+        onTranscript(transcript);
+        onFinal?.(transcript);
+      }
     } catch (err) {
-      console.error("Transcription failed:", err);
+      console.error("Final transcription failed:", err);
+      alert(`Transcription failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       setIsTranscribing(false);
+      allChunksRef.current = [];
     }
   }
 
-  // --- Unified handlers ---
   function startRecording() {
-    if (effectiveMode === "browser") {
-      startBrowserRecording();
-    } else {
-      startWhisperRecording();
-    }
+    startWhisperRecording();
   }
 
   function stopRecording() {
-    if (effectiveMode === "browser") {
-      stopBrowserRecording();
-    } else {
-      stopWhisperRecording();
-    }
+    stopWhisperRecording();
   }
 
   function formatTime(secs: number) {
@@ -247,11 +268,7 @@ export function AudioRecorder({
       onClick={startRecording}
       disabled={disabled}
       className="shrink-0"
-      title={
-        effectiveMode === "browser"
-          ? "Record with browser speech recognition (free)"
-          : "Record with Whisper (requires OpenAI key)"
-      }
+      title="Record audio (Whisper transcription)"
     >
       <Mic className="h-4 w-4" />
     </Button>

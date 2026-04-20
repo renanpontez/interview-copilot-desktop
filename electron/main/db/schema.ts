@@ -53,6 +53,23 @@ CREATE TABLE IF NOT EXISTS cvs (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS interview_logs (
+  id TEXT PRIMARY KEY,
+  scenario_id TEXT NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL,
+  messages TEXT NOT NULL DEFAULT '[]',
+  scores TEXT NOT NULL DEFAULT '[]',
+  summary TEXT,
+  user_notes TEXT NOT NULL DEFAULT '',
+  user_ai_rating INTEGER,
+  user_ai_feedback TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'completed',
+  duration_sec INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_interview_logs_scenario ON interview_logs(scenario_id);
+
 CREATE TABLE IF NOT EXISTS token_usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   operation TEXT NOT NULL,

@@ -1,6 +1,8 @@
-import { autoUpdater } from "electron-updater";
+import pkg from "electron-updater";
+const { autoUpdater } = pkg;
 import { BrowserWindow, dialog } from "electron";
-import log from "electron-log";
+import logPkg from "electron-log";
+const log = logPkg;
 
 export function setupAutoUpdater() {
   autoUpdater.logger = log;

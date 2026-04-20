@@ -55,7 +55,7 @@ export function WelcomeModal() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) return; setOpen(v); }}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-center text-lg">

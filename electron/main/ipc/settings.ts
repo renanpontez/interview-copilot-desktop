@@ -2,31 +2,37 @@ import { ipcMain } from "electron";
 import { getDb } from "../db/client";
 import type { AppSettings } from "../../types/domain";
 
-const SERVICE = "interview-copilot";
-const ACCOUNT = "api-key";
+// API key stored in-memory. Persisted to a `secrets` table in SQLite.
+// Not as secure as Keychain but avoids native module ESM issues.
+// The DB is local-only so the risk is minimal.
+let _apiKey: string | null = null;
 
-// Dynamically import keytar (native module)
-async function getKeytar() {
-  try {
-    return await import("keytar");
-  } catch {
-    return null;
-  }
+function ensureSecretsTable() {
+  getDb().exec(`
+    CREATE TABLE IF NOT EXISTS secrets (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
 }
 
-// Fallback: in-memory store if keytar unavailable
-let _fallbackKey = "";
+function loadApiKey() {
+  ensureSecretsTable();
+  const row = getDb()
+    .prepare("SELECT value FROM secrets WHERE key = 'api_key'")
+    .get() as { value: string } | undefined;
+  _apiKey = row?.value ?? null;
+}
 
-export async function getStoredApiKey(): Promise<string | null> {
-  const kt = await getKeytar();
-  if (kt) {
-    const key = await kt.getPassword(SERVICE, ACCOUNT);
-    return key || null;
-  }
-  return _fallbackKey || null;
+export function getStoredApiKey(): string | null {
+  if (_apiKey === null) loadApiKey();
+  return _apiKey;
 }
 
 export function registerSettingsHandlers() {
+  // Load key on startup
+  loadApiKey();
+
   ipcMain.handle("settings:get", (): AppSettings => {
     const row = getDb()
       .prepare(
@@ -55,21 +61,18 @@ export function registerSettingsHandlers() {
     }
   );
 
-  ipcMain.handle("settings:getApiKey", async (): Promise<string | null> => {
+  ipcMain.handle("settings:getApiKey", (): string | null => {
     return getStoredApiKey();
   });
 
-  ipcMain.handle("settings:setApiKey", async (_e, key: string) => {
-    const kt = await getKeytar();
-    if (kt) {
-      if (key) {
-        await kt.setPassword(SERVICE, ACCOUNT, key);
-      } else {
-        await kt.deletePassword(SERVICE, ACCOUNT);
-      }
-    } else {
-      _fallbackKey = key;
-    }
+  ipcMain.handle("settings:setApiKey", (_e, key: string) => {
+    ensureSecretsTable();
+    getDb()
+      .prepare(
+        "INSERT INTO secrets (key, value) VALUES ('api_key', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(key);
+    _apiKey = key;
   });
 
   ipcMain.handle("settings:isWelcomeDismissed", (): boolean => {

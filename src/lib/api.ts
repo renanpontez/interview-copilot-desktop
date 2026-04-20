@@ -2,7 +2,7 @@
 // Phase 1: stubs so the renderer can compile while IPC isn't wired yet.
 // Phase 2: real calls via `window.api` from preload.
 
-import type { AppSettings, Job, Profile, Scenario, SessionCosts, StoredCv, TokenUsage } from "@shared/domain";
+import type { AppSettings, InterviewLog, Job, Profile, Scenario, SessionCosts, StoredCv, TokenUsage } from "@shared/domain";
 
 declare global {
   interface Window {
@@ -58,6 +58,13 @@ export interface DesktopApi {
       onChunk: (cb: (data: { text: string }) => void) => () => void;
       onDone: (cb: (data: { fullText: string; usage: unknown }) => void) => () => void;
     };
+    generateSummary: (transcript: string) => Promise<Record<string, unknown>>;
+  };
+  interviewLogs: {
+    save: (log: InterviewLog) => Promise<void>;
+    listForScenario: (scenarioId: string) => Promise<InterviewLog[]>;
+    get: (id: string) => Promise<InterviewLog | null>;
+    delete: (id: string) => Promise<void>;
   };
   backup: {
     exportAll: () => Promise<string>;

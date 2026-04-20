@@ -63,6 +63,14 @@ const api = {
         return () => ipcRenderer.removeListener("ai:chat:done", handler);
       },
     },
+    generateSummary: (transcript: string) =>
+      ipcRenderer.invoke("ai:generateSummary", transcript),
+  },
+  interviewLogs: {
+    save: (log: Record<string, unknown>) => ipcRenderer.invoke("interviewLogs:save", log),
+    listForScenario: (scenarioId: string) => ipcRenderer.invoke("interviewLogs:listForScenario", scenarioId),
+    get: (id: string) => ipcRenderer.invoke("interviewLogs:get", id),
+    delete: (id: string) => ipcRenderer.invoke("interviewLogs:delete", id),
   },
   backup: {
     exportAll: () => ipcRenderer.invoke("backup:exportAll"),

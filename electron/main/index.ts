@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell, systemPreferences } from "electron";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeDb } from "./db/client";
@@ -10,6 +10,7 @@ import { registerCvHandlers } from "./ipc/cvs";
 import { registerCostHandlers } from "./ipc/costs";
 import { registerBackupHandlers } from "./ipc/backup";
 import { registerAiHandlers, setApiKeyGetter } from "./ipc/ai";
+import { registerInterviewLogHandlers } from "./ipc/interview-logs";
 import { setupMenu } from "./menu";
 import { setupAutoUpdater } from "./updater";
 
@@ -22,8 +23,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "Interview Copilot",
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 16, y: 16 },
+    titleBarStyle: "default",
     backgroundColor: "#0a0a0a",
     show: false,
     webPreferences: {
@@ -60,10 +60,25 @@ app.whenReady().then(() => {
   registerCostHandlers();
   registerBackupHandlers();
   registerAiHandlers();
+  registerInterviewLogHandlers();
 
   setApiKeyGetter(getStoredApiKey);
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
+
+  // Auto-grant media permissions in the renderer
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === "media") {
+      callback(true);
+    } else {
+      callback(true);
+    }
+  });
+
+  // Request mic at OS level on macOS
+  if (process.platform === "darwin") {
+    systemPreferences.askForMediaAccess("microphone").catch(() => {});
+  }
 
   setupMenu();
   createWindow();

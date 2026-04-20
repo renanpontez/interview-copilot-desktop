@@ -11,10 +11,16 @@ import {
   Square,
   Star,
   Zap,
+  RotateCcw,
+  Save,
+  CheckCircle2,
+  AlertCircle,
+  Lightbulb,
+  Target,
 } from "lucide-react";
 import { AudioRecorder } from "@/components/interview/audio-recorder";
 import { api } from "@/lib/api";
-import type { AppSettings, Job, Scenario } from "@shared/domain";
+import type { AppSettings, InterviewLog, InterviewSummary, Job, Scenario } from "@shared/domain";
 
 interface Message {
   id: string;
@@ -57,10 +63,37 @@ RULES:
 - After 2-3 follow-ups on the same topic, move to a new area`;
 }
 
+const readinessLabels: Record<string, string> = {
+  ready: "Ready",
+  almost_ready: "Almost Ready",
+  needs_work: "Needs Work",
+  not_ready: "Not Ready",
+};
+
+const readinessColors: Record<string, string> = {
+  ready: "bg-green-500/20 text-green-400 border-green-500/30",
+  almost_ready: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  needs_work: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  not_ready: "bg-red-500/20 text-red-400 border-red-500/30",
+};
+
+function scoreColor(score: number): string {
+  if (score >= 8) return "text-green-400";
+  if (score >= 6) return "text-yellow-400";
+  return "text-red-400";
+}
+
+function scoreBgColor(score: number): string {
+  if (score >= 8) return "bg-green-500/10 border-green-500/20";
+  if (score >= 6) return "bg-yellow-500/10 border-yellow-500/20";
+  return "bg-red-500/10 border-red-500/20";
+}
+
 export default function InterviewPage() {
   const { id: jobId, scenarioId } = useParams<{ id: string; scenarioId: string }>();
   const navigate = useNavigate();
 
+  const [phase, setPhase] = useState<"chat" | "review">("chat");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -68,6 +101,15 @@ export default function InterviewPage() {
   const [questionCount, setQuestionCount] = useState(0);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [collectedScores, setCollectedScores] = useState<{ questionText: string; overall: number; feedback: string }[]>([]);
+
+  // Review phase state
+  const [summary, setSummary] = useState<InterviewSummary | null>(null);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [userNotes, setUserNotes] = useState("");
+  const [userAiRating, setUserAiRating] = useState<number>(0);
+  const [userAiFeedback, setUserAiFeedback] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const [job, setJob] = useState<Job | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -102,12 +144,12 @@ export default function InterviewPage() {
   // Timer
   useEffect(() => {
     timerRef.current = setInterval(() => {
-      if (!isPaused) setElapsedSec((s) => s + 1);
+      if (!isPaused && phase === "chat") setElapsedSec((s) => s + 1);
     }, 1000);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPaused]);
+  }, [isPaused, phase]);
 
   // Auto-scroll
   useEffect(() => {
@@ -169,17 +211,36 @@ export default function InterviewPage() {
     });
 
     try {
-      // TODO: Phase 4 — replace with api.ai.chat() streaming call
-      // For now, simulate a placeholder response
-      const placeholderText = "[AI chat not yet wired — Phase 4 will connect api.ai.chat() here]";
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? { ...m, content: placeholderText } : m))
-      );
-      setQuestionCount((c) => c + 1);
-      void systemPrompt; // suppress unused warning
-      void conversationMessages;
+      // Set up streaming listeners
+      let fullText = "";
+      const offChunk = api.ai.chat.onChunk(({ text }) => {
+        fullText += text;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, content: fullText } : m))
+        );
+      });
+      const donePromise = new Promise<void>((resolve) => {
+        const offDone = api.ai.chat.onDone(() => {
+          setQuestionCount((c) => c + 1);
+          offDone();
+          resolve();
+        });
+      });
+
+      await api.ai.chat.start({
+        apiProvider: settings.apiProvider,
+        model: settings.model,
+        systemPrompt,
+        messages: conversationMessages,
+      });
+
+      await donePromise;
+      offChunk();
     } catch (err) {
       console.error(err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, content: `Error: ${err instanceof Error ? err.message : err}` } : m))
+      );
     } finally {
       setIsStreaming(false);
     }
@@ -210,12 +271,34 @@ export default function InterviewPage() {
     if (!settings || !scenario || !job) return;
     setIsScoring(true);
     try {
-      // TODO: Phase 4 — replace with api.ai.scoreAnswer()
-      void questionText;
-      void answerText;
-      // Placeholder: no scoring until AI is wired
+      const data = await api.ai.scoreAnswer({
+        apiProvider: settings.apiProvider,
+        model: settings.model,
+        questionText,
+        answerText,
+        scenarioType: scenario.type,
+        targetRole: job.role,
+        difficulty: settings.defaultDifficulty,
+        profileContext,
+      }) as { feedback?: { scores?: { overall?: number }; strengths?: string[] }; error?: string };
+      if (data.feedback) {
+        const f = data.feedback;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `coach-${Date.now()}`,
+            role: "coach",
+            content: `Score: ${f.scores?.overall ?? "?"}/10 — ${(f.strengths || []).slice(0, 2).join(", ")}`,
+          },
+        ]);
+        setCollectedScores(prev => [...prev, {
+          questionText,
+          overall: f.scores?.overall ?? 0,
+          feedback: (f.strengths || []).join(", "),
+        }]);
+      }
     } catch {
-      // silent
+      // silent — don't break the chat flow
     } finally {
       setIsScoring(false);
     }
@@ -223,7 +306,8 @@ export default function InterviewPage() {
 
   function handleAction(action: string) {
     if (action === "end") {
-      navigate(`/jobs/${jobId}`);
+      setPhase("review");
+      generateReviewSummary();
       return;
     }
     const prefixes: Record<string, string> = {
@@ -233,6 +317,81 @@ export default function InterviewPage() {
     };
     sendToChat(messages, "Please continue.", prefixes[action]);
   }
+
+  async function generateReviewSummary() {
+    setIsLoadingSummary(true);
+    try {
+      const transcript = messages
+        .filter((m) => m.role === "interviewer" || m.role === "candidate")
+        .map((m) => `${m.role === "interviewer" ? "Interviewer" : "Candidate"}: ${m.content}`)
+        .join("\n\n");
+      const result = await api.ai.generateSummary(transcript);
+      setSummary(result as unknown as InterviewSummary);
+    } catch (err) {
+      console.error("Failed to generate summary:", err);
+      setSummary({
+        overallScore: 0,
+        strengthsSummary: "Unable to generate summary",
+        weaknessSummary: "",
+        repeatedPatterns: [],
+        recommendedPracticeAreas: [],
+        interviewReadiness: "not_ready",
+        keyInsights: [],
+      });
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  }
+
+  async function handleSaveAndClose() {
+    if (!jobId || !scenarioId) return;
+    setIsSaving(true);
+    try {
+      const log: InterviewLog = {
+        id: `il_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        scenarioId: scenarioId!,
+        jobId: jobId!,
+        messages: messages.filter(m => m.role !== "coach").map(m => ({ role: m.role, content: m.content })),
+        scores: collectedScores,
+        summary,
+        userNotes,
+        userAiRating: userAiRating > 0 ? userAiRating : null,
+        userAiFeedback,
+        status: "completed",
+        durationSec: elapsedSec,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await api.interviewLogs.save(log);
+      navigate(`/jobs/${jobId}`);
+    } catch (err) {
+      console.error("Failed to save interview log:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleRedo() {
+    setMessages([]);
+    setPhase("chat");
+    setQuestionCount(0);
+    setElapsedSec(0);
+    setCollectedScores([]);
+    setSummary(null);
+    setUserNotes("");
+    setUserAiRating(0);
+    setUserAiFeedback("");
+    startedRef.current = false;
+  }
+
+  // Re-trigger auto-start when redo resets startedRef
+  useEffect(() => {
+    if (!startedRef.current && dataLoaded && job && scenario && apiKey && phase === "chat" && messages.length === 0) {
+      startedRef.current = true;
+      sendToChat([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, messages.length]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -281,6 +440,231 @@ export default function InterviewPage() {
     );
   }
 
+  // --- REVIEW PHASE ---
+  if (phase === "review") {
+    if (isLoadingSummary || !summary) {
+      return (
+        <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Analyzing your interview performance...</p>
+          <p className="text-xs text-muted-foreground/60">This may take a moment</p>
+        </div>
+      );
+    }
+
+    const avgScore = collectedScores.length > 0
+      ? collectedScores.reduce((sum, s) => sum + s.overall, 0) / collectedScores.length
+      : summary.overallScore;
+    const displayScore = summary.overallScore || avgScore;
+
+    // Parse strengths/weaknesses from summary strings into lists
+    const strengths = summary.strengthsSummary
+      ? summary.strengthsSummary.split(/[.;]/).map(s => s.trim()).filter(Boolean)
+      : [];
+    const weaknesses = summary.weaknessSummary
+      ? summary.weaknessSummary.split(/[.;]/).map(s => s.trim()).filter(Boolean)
+      : [];
+
+    return (
+      <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+        {/* Top bar */}
+        <div className="flex items-center justify-between border-b px-4 py-2 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">{job.company} — {scenario.title}</p>
+              <p className="text-[11px] text-muted-foreground">Interview Review</p>
+            </div>
+          </div>
+          <Badge variant="outline" className="text-xs font-mono">
+            {formatTime(elapsedSec)}
+          </Badge>
+        </div>
+
+        {/* Scrollable review content */}
+        <div className="flex-1 overflow-y-auto px-4 py-6">
+          <div className="mx-auto max-w-2xl space-y-6">
+
+            {/* Summary card */}
+            <div className={`rounded-xl border p-6 ${scoreBgColor(displayScore)}`}>
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <p className={`text-4xl font-bold tabular-nums ${scoreColor(displayScore)}`}>
+                      {displayScore.toFixed(1)}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">/10</p>
+                  </div>
+                  <div>
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${readinessColors[summary.interviewReadiness] || readinessColors.not_ready}`}
+                    >
+                      {readinessLabels[summary.interviewReadiness] || "Unknown"}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex gap-6 text-center">
+                  <div>
+                    <p className="text-lg font-semibold">{questionCount}</p>
+                    <p className="text-[11px] text-muted-foreground">Questions</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold">{formatTime(elapsedSec)}</p>
+                    <p className="text-[11px] text-muted-foreground">Duration</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Strengths */}
+            {strengths.length > 0 && (
+              <div className="rounded-xl border p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-400" />
+                  <h3 className="text-sm font-semibold">Strengths</h3>
+                </div>
+                <ul className="space-y-2">
+                  {strengths.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-green-300/90">
+                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-400 shrink-0" />
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Weaknesses */}
+            {weaknesses.length > 0 && (
+              <div className="rounded-xl border p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-400" />
+                  <h3 className="text-sm font-semibold">Areas for Improvement</h3>
+                </div>
+                <ul className="space-y-2">
+                  {weaknesses.map((w, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-red-300/90">
+                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-red-400 shrink-0" />
+                      {w}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Key Insights */}
+            {summary.keyInsights.length > 0 && (
+              <div className="rounded-xl border p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="h-4 w-4 text-yellow-400" />
+                  <h3 className="text-sm font-semibold">Key Insights</h3>
+                </div>
+                <ul className="space-y-2">
+                  {summary.keyInsights.map((insight, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-yellow-400 shrink-0" />
+                      {insight}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Recommended Practice Areas */}
+            {summary.recommendedPracticeAreas.length > 0 && (
+              <div className="rounded-xl border p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Target className="h-4 w-4 text-blue-400" />
+                  <h3 className="text-sm font-semibold">Recommended Practice Areas</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {summary.recommendedPracticeAreas.map((area, i) => (
+                    <Badge key={i} variant="outline" className="text-xs bg-blue-500/10 text-blue-300 border-blue-500/20">
+                      {area}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* User Feedback */}
+            <div className="rounded-xl border p-5 space-y-4">
+              <h3 className="text-sm font-semibold">Your Feedback</h3>
+
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">Your notes</label>
+                <Textarea
+                  value={userNotes}
+                  onChange={(e) => setUserNotes(e.target.value)}
+                  placeholder="How did this interview feel? What would you do differently?"
+                  className="min-h-[80px] resize-none text-sm"
+                  rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">Rate the AI interviewer</label>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setUserAiRating(star)}
+                      className="p-0.5 transition-colors"
+                    >
+                      <Star
+                        className={`h-5 w-5 ${
+                          star <= userAiRating
+                            ? "fill-yellow-400 text-yellow-400"
+                            : "text-muted-foreground/40 hover:text-yellow-400/60"
+                        }`}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">AI feedback</label>
+                <Textarea
+                  value={userAiFeedback}
+                  onChange={(e) => setUserAiFeedback(e.target.value)}
+                  placeholder="Was the AI realistic? Any issues or suggestions?"
+                  className="min-h-[60px] resize-none text-sm"
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-3 pb-6">
+              <Button
+                onClick={handleSaveAndClose}
+                disabled={isSaving}
+                className="flex-1 gap-2"
+              >
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                Save & Close
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleRedo}
+                className="gap-2"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Redo Interview
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- CHAT PHASE ---
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)]">
       {/* Top bar */}

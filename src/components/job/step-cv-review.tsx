@@ -144,10 +144,25 @@ export function StepCvReview({ job, onUpdate, onNext, onSkip, onBack }: StepCvRe
       }
       if (!cvText.trim()) { alert("Could not extract text from CV. Try editing the document first."); setIsAnalyzing(false); return; }
 
-      // TODO: Phase 4 — replace with api.ai.analyzeCv()
-      void cvText;
-      alert("CV analysis will be available in Phase 4 when AI is wired up.");
-    } catch { alert("Analysis failed."); }
+      const settings = await api.settings.get();
+      const profile = await api.profile.get();
+      const data = await api.ai.analyzeCv({
+        apiProvider: settings.apiProvider,
+        model: settings.model,
+        jobDescription: job.jobDescription,
+        cvText,
+        profileContext: profile.context,
+      }) as Record<string, unknown>;
+      if (data.error) { alert(`Analysis failed: ${data.error}`); return; }
+      setAnalysis({
+        strengths: data.strengths as CvAnalysis["strengths"],
+        gaps: data.gaps as CvAnalysis["gaps"],
+        keywordSuggestions: data.keywordSuggestions as CvAnalysis["keywordSuggestions"],
+        reorderSuggestions: data.reorderSuggestions as CvAnalysis["reorderSuggestions"],
+        overallFit: data.overallFit as CvAnalysis["overallFit"],
+        summary: data.summary as string,
+      });
+    } catch (err) { alert(`Analysis failed: ${err instanceof Error ? err.message : err}`); }
     finally { setIsAnalyzing(false); }
   }
 

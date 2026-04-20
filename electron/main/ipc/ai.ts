@@ -19,14 +19,14 @@ import {
   getInterviewerSystemPrompt,
 } from "../ai/prompts";
 
-let _getApiKey: () => Promise<string | null> = async () => null;
+let _getApiKey: () => string | null = () => null;
 
-export function setApiKeyGetter(fn: () => Promise<string | null>) {
+export function setApiKeyGetter(fn: () => string | null) {
   _getApiKey = fn;
 }
 
-async function requireConfig(overrides?: Partial<AIConfig>): Promise<AIConfig> {
-  const key = await _getApiKey();
+function requireConfig(overrides?: Partial<AIConfig>): AIConfig {
+  const key = _getApiKey();
   if (!key) throw new Error("API key not configured");
   return {
     apiProvider: (overrides?.apiProvider as AIConfig["apiProvider"]) || "openai",
@@ -48,7 +48,7 @@ export function registerAiHandlers() {
     profileContext?: string;
     questionCount?: number;
   }) => {
-    const config = await requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
+    const config = requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
     const systemPrompt = getQuestionGenerationPrompt({
       scenarioType: input.scenarioType,
       targetRole: input.targetRole,
@@ -74,7 +74,7 @@ export function registerAiHandlers() {
     profileContext?: string;
     questionRubric?: { expectedSignals: string[]; rubricHints: string } | null;
   }) => {
-    const config = await requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
+    const config = requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
     const coachPrompt = getCoachSystemPrompt(
       input.profileContext ? { summary: input.profileContext } : null,
       input.questionRubric || null
@@ -92,7 +92,7 @@ export function registerAiHandlers() {
     cvText: string;
     profileContext?: string;
   }) => {
-    const config = await requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
+    const config = requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
     const systemPrompt = getCvAnalysisPrompt({
       jobDescription: input.jobDescription,
       profileContext: input.profileContext || "",
@@ -103,7 +103,7 @@ export function registerAiHandlers() {
 
   // --- Transcribe Audio ---
   ipcMain.handle("ai:transcribeAudio", async (_e, audioData: Uint8Array, context?: string) => {
-    const key = await _getApiKey();
+    const key = _getApiKey();
     if (!key) throw new Error("API key not configured");
 
     // Write to temp file (OpenAI SDK needs a file-like stream)
@@ -125,6 +125,16 @@ export function registerAiHandlers() {
     }
   });
 
+  // --- Generate Summary ---
+  ipcMain.handle("ai:generateSummary", async (_e, transcript: string) => {
+    const config = requireConfig();
+    const { getSummaryPrompt } = await import("../ai/prompts");
+    const { generateSessionSummary } = await import("../ai/client");
+    const systemPrompt = getSummaryPrompt();
+    const { summary, usage } = await generateSessionSummary(config, systemPrompt, transcript);
+    return { ...summary, usage };
+  });
+
   // --- Streaming Chat ---
   ipcMain.handle("ai:chat:start", async (event, input: {
     apiProvider?: string;
@@ -132,7 +142,7 @@ export function registerAiHandlers() {
     systemPrompt: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
   }) => {
-    const config = await requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
+    const config = requireConfig({ apiProvider: input.apiProvider as AIConfig["apiProvider"], model: input.model });
     const result = await generateInterviewResponse(config, input.systemPrompt, input.messages);
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;

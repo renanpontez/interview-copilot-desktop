@@ -78,3 +78,29 @@ export interface StoredCv {
   blob: Uint8Array;
   fileName: string;
 }
+
+export interface InterviewSummary {
+  overallScore: number;
+  strengthsSummary: string;
+  weaknessSummary: string;
+  repeatedPatterns: string[];
+  recommendedPracticeAreas: string[];
+  interviewReadiness: "not_ready" | "needs_work" | "almost_ready" | "ready";
+  keyInsights: string[];
+}
+
+export interface InterviewLog {
+  id: string;
+  scenarioId: string;
+  jobId: string;
+  messages: { role: string; content: string }[];
+  scores: { questionText: string; overall: number; feedback: string }[];
+  summary: InterviewSummary | null;
+  userNotes: string;
+  userAiRating: number | null;
+  userAiFeedback: string;
+  status: "completed" | "in_progress";
+  durationSec: number;
+  createdAt: string;
+  updatedAt: string;
+}
