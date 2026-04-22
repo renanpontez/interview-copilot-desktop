@@ -2,6 +2,8 @@ appId: com.renanpontez.interviewcopilot
 productName: Interview Copilot
 copyright: Copyright © 2026 Renan Martins
 
+icon: resources/icon.png
+
 directories:
   buildResources: resources
   output: release
